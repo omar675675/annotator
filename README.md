@@ -65,3 +65,4 @@ annotated/  Output images/labels (gitignored contents, folders tracked)
 
 `dataset/` and the contents of `annotated/images/` and `annotated/labels/`
 are gitignored — they're local data, not part of the repo.
+# annotator
