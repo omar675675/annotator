@@ -6,8 +6,9 @@ __pycache__/
 # Model weights (keep the models/ folder, not the actual weight files)
 models/*.pt
 
-# Dataset (raw/source images, never committed)
-dataset/
+# Dataset: keep the folder, ignore its contents (never committed)
+dataset/*
+!dataset/.gitkeep
 
 # Annotated output: keep the images/ and labels/ folders, ignore their contents
 annotated/images/*
