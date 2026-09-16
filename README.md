@@ -46,6 +46,20 @@ Then open http://127.0.0.1:8000
    your own by dragging on the image.
 4. Adjust/delete boxes, assign classes, then submit.
 
+## Keyboard shortcuts
+
+| Key | Action |
+| --- | --- |
+| `B` | Switch to draw (box) tool |
+| `D` | Switch to pan tool |
+| `Space` (hold) | Temporarily pan |
+| `1`-`9` | Assign class to selected box, or set active class for drawing |
+| `Delete` / `Backspace` | Delete selected box |
+| `Shift+Delete` / `Shift+Backspace` | Delete current image (with confirmation) |
+| `←` / `→` | Previous / next image |
+| `S` | Save and go to next image |
+| `Esc` | Close menu/picker, or switch to select tool |
+
 ## Output
 
 - Finished images move to `annotated/images/`, their YOLO-format labels to
