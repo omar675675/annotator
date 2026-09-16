@@ -3,6 +3,9 @@ __pycache__/
 *.pyc
 .venv/
 
+# Model weights (keep the models/ folder, not the actual weight files)
+models/*.pt
+
 # Dataset (raw/source images, never committed)
 dataset/
 
