@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Annotator</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-left">
+      <h1>Annotator</h1>
+      <span id="modelBadge" class="badge">–</span>
+    </div>
+    <div class="topbar-right">
+      <button id="classmapBtn" class="icon-btn" title="Class mapping settings">⚙</button>
+    </div>
+  </header>
+
+  <div class="tabbar">
+    <button id="pendingTab" class="tab active" data-tab="pending">Pending <span id="pendingTabCount" class="tab-count">–</span></button>
+    <button id="annotatedTab" class="tab" data-tab="annotated">Annotated <span id="annotatedTabCount" class="tab-count">–</span></button>
+    <div class="tabbar-spacer"></div>
+    <div id="toolBadge" class="tool-badge">Select <kbd>Esc</kbd></div>
+  </div>
+
+  <main class="layout">
+    <section class="canvas-wrap">
+      <canvas id="canvas"></canvas>
+      <button id="prevBtn" class="nav-arrow left" title="Previous image">‹</button>
+      <button id="nextBtn" class="nav-arrow right" title="Next image">›</button>
+      <div id="emptyState" class="empty-state" hidden>
+        <h2 id="emptyStateTitle">All done 🎉</h2>
+        <p id="emptyStateText">No pending images left in the dataset folder.</p>
+      </div>
+      <div id="loadingState" class="empty-state">
+        <p>Loading…</p>
+      </div>
+    </section>
+
+    <aside class="sidebar">
+      <div class="panel">
+        <h3>Classes</h3>
+        <p class="hint">Number keys select the active class, or re-class the selected box.</p>
+        <ul id="classList" class="class-list"></ul>
+      </div>
+
+      <div class="panel actions">
+        <button id="nextActionBtn" class="btn primary">Next <kbd>→</kbd></button>
+        <button id="deleteImageBtn" class="btn danger">Delete Image <kbd>⇧Del</kbd></button>
+      </div>
+
+      <div class="panel">
+        <h3>Shortcuts</h3>
+        <ul class="shortcut-list">
+          <li><kbd>drag</kbd> draw / move / resize box</li>
+          <li><kbd>B</kbd> draw tool, <kbd>D</kbd> pan tool, <kbd>Esc</kbd> select tool</li>
+          <li><kbd>right-click</kbd> box: delete / duplicate</li>
+          <li><kbd>1</kbd>–<kbd>9</kbd> set class</li>
+          <li><kbd>Del</kbd> delete selected box</li>
+          <li><kbd>wheel</kbd> zoom, <kbd>space</kbd>+drag pan</li>
+          <li><kbd>←</kbd>/<kbd>→</kbd> saves current image, moves to prev/next</li>
+        </ul>
+        <p class="hint">Labels save automatically as you add or delete boxes — no save button needed.</p>
+      </div>
+    </aside>
+  </main>
+
+  <div id="classmapModal" class="modal-backdrop" hidden>
+    <div class="modal">
+      <h2>Map model classes → your classes</h2>
+      <p class="hint">The loaded model's classes don't all match your class list. Choose where each model class should go, or ignore it.</p>
+      <div id="classmapRows" class="classmap-rows"></div>
+      <div class="modal-actions">
+        <button id="classmapCancelBtn" class="btn">Cancel</button>
+        <button id="classmapSaveBtn" class="btn primary">Save mapping</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="confirmDeleteModal" class="modal-backdrop" hidden>
+    <div class="modal">
+      <h2>Delete this image?</h2>
+      <p class="hint">This permanently removes the image file. There is no undo.</p>
+      <div class="modal-actions">
+        <button id="cancelDeleteBtn" class="btn">Cancel</button>
+        <button id="confirmDeleteBtn" class="btn danger">Delete</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="boxContextMenu" class="context-menu" hidden>
+    <button id="ctxDuplicate">Duplicate</button>
+    <button id="ctxDelete" class="danger">Delete</button>
+  </div>
+
+  <div id="classPicker" class="context-menu class-picker" hidden></div>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

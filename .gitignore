@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Dataset (raw/source images, never committed)
+dataset/
+
+# Annotated output: keep the images/ and labels/ folders, ignore their contents
+annotated/images/*
+annotated/labels/*
+!annotated/images/.gitkeep
+!annotated/labels/.gitkeep
+annotated/.annotator_state.json
+
+# Videos
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.webm

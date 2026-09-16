@@ -1,0 +1,6 @@
+boots
+helmet
+no_boots
+no_helmet
+no_vest
+vest

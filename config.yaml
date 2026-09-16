@@ -1,0 +1,12 @@
+model_path: models/ppe_1_m.pt
+dataset_dir: dataset/no_helmet_vest_2
+annotated_dir: annotated
+classes:
+- boots
+- helmet
+- no_boots
+- no_helmet
+- no_vest
+- vest
+confidence_threshold: 0.25
+class_map: {}
