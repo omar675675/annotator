@@ -1,5 +1,5 @@
-model_path: ""
-sam_model_path: ""
+model_path: "models/ppe-m.pt"
+sam_model_path: "models/sam3.pt"
 dataset_dir: dataset/images
 annotated_dir: annotated
 classes:
