@@ -22,6 +22,7 @@
     nextBtn: document.getElementById("nextBtn"),
     toolBadge: document.getElementById("toolBadge"),
     contextMenu: document.getElementById("boxContextMenu"),
+    ctxNextMask: document.getElementById("ctxNextMask"),
     ctxDuplicate: document.getElementById("ctxDuplicate"),
     ctxDelete: document.getElementById("ctxDelete"),
     classPicker: document.getElementById("classPicker"),
@@ -29,9 +30,20 @@
     classmapRows: document.getElementById("classmapRows"),
     classmapSaveBtn: document.getElementById("classmapSaveBtn"),
     classmapCancelBtn: document.getElementById("classmapCancelBtn"),
-    confirmDeleteModal: document.getElementById("confirmDeleteModal"),
-    confirmDeleteBtn: document.getElementById("confirmDeleteBtn"),
-    cancelDeleteBtn: document.getElementById("cancelDeleteBtn"),
+    samPanel: document.getElementById("samPanel"),
+    samPromptInput: document.getElementById("samPromptInput"),
+    samPromptBtn: document.getElementById("samPromptBtn"),
+    promptChips: document.getElementById("promptChips"),
+    autoPrompt: document.getElementById("autoPrompt"),
+    autoPromptText: document.getElementById("autoPromptText"),
+    autoPromptStop: document.getElementById("autoPromptStop"),
+    promptClassModal: document.getElementById("promptClassModal"),
+    promptClassTerm: document.getElementById("promptClassTerm"),
+    promptClassOptions: document.getElementById("promptClassOptions"),
+    promptClassSkip: document.getElementById("promptClassSkip"),
+    warningBar: document.getElementById("warningBar"),
+    warningText: document.getElementById("warningText"),
+    warningClose: document.getElementById("warningClose"),
     toast: document.getElementById("toast"),
   };
 
@@ -60,7 +72,18 @@
     panY: 0,
     spaceHeld: false,
     drag: null, // {mode, ...}
+    samLoaded: false,
+    dirty: false, // edited since loaded — only then does leaving an annotated image re-save it
   };
+
+  // Boxes waiting on a SAM mask, keyed to their latest request id so an
+  // older reply never overwrites a newer one.
+  const segmentRequests = new WeakMap();
+  // The box SAM was last prompted with (before the box snapped to the mask),
+  // and which of SAM's candidate masks is showing — so "Next mask" re-asks
+  // with the same prompt instead of the snapped box.
+  const promptBoxes = new WeakMap();
+  const maskChoices = new WeakMap();
 
   function classColor(i) {
     const hue = (i * 360) / Math.max(state.classes.length, 1);
@@ -163,10 +186,16 @@
       const p2 = imageToScreen(rect.left + rect.width, rect.top + rect.height);
       const color = classColor(box.class_id);
       const selected = i === state.selectedIndex;
+      // a box being moved/resized will get a fresh mask on release — hide the stale one
+      const beingEdited = state.drag && state.drag.boxIndex === i;
+
+      if (box.polygon && !beingEdited) drawPolygon(box.polygon, color, selected);
 
       ctx.lineWidth = selected ? 1.5 : 1;
       ctx.strokeStyle = color;
+      if (segmentRequests.has(box)) ctx.setLineDash([4, 3]);
       ctx.strokeRect(p1.x, p1.y, p2.x - p1.x, p2.y - p1.y);
+      ctx.setLineDash([]);
 
       if (selected) {
         ctx.fillStyle = color;
@@ -193,6 +222,23 @@
         });
       }
     });
+  }
+
+  function drawPolygon(polygon, color, selected) {
+    ctx.beginPath();
+    polygon.forEach(([x, y], j) => {
+      const p = imageToScreen(x * state.imgW, y * state.imgH);
+      if (j === 0) ctx.moveTo(p.x, p.y);
+      else ctx.lineTo(p.x, p.y);
+    });
+    ctx.closePath();
+    ctx.fillStyle = color;
+    ctx.globalAlpha = selected ? 0.45 : 0.3;
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = color;
+    ctx.stroke();
   }
 
   function handlePositions(p1, p2) {
@@ -403,6 +449,14 @@
         state.selectedIndex = state.boxes.length - 1;
         autosave();
         showClassPicker(state.selectedIndex);
+        segmentBox(state.drag.previewBox);
+      }
+    }
+    if (state.drag.mode === "move" || state.drag.mode === "resize") {
+      const box = state.boxes[state.drag.boxIndex];
+      const orig = state.drag.origBox;
+      if (box && (box.x !== orig.x || box.y !== orig.y || box.w !== orig.w || box.h !== orig.h)) {
+        boxChanged(box, orig);
       }
     }
     state.drag = null;
@@ -479,18 +533,27 @@
     let top = (orig.y * state.imgH - hPx / 2) + offsetPx;
     left = Math.max(0, Math.min(left, state.imgW - wPx));
     top = Math.max(0, Math.min(top, state.imgH - hPx));
-    state.boxes.push({
+    const copy = {
       class_id: orig.class_id,
       x: (left + wPx / 2) / state.imgW,
       y: (top + hPx / 2) / state.imgH,
       w: orig.w,
       h: orig.h,
-    });
+    };
+    copy.polygon = orig.polygon ? fitPolygon(orig.polygon, orig, copy) : null;
+    state.boxes.push(copy);
     state.selectedIndex = state.boxes.length - 1;
     draw();
     renderClassList();
     autosave();
+    segmentBox(copy);
   }
+
+  el.ctxNextMask.addEventListener("click", () => {
+    const idx = Number(el.contextMenu.dataset.boxIndex);
+    hideContextMenu();
+    nextMask(state.boxes[idx]);
+  });
 
   el.ctxDuplicate.addEventListener("click", () => {
     const idx = Number(el.contextMenu.dataset.boxIndex);
@@ -571,7 +634,13 @@
 
   window.addEventListener("keydown", (e) => {
     if (document.activeElement && ["SELECT", "INPUT", "TEXTAREA"].includes(document.activeElement.tagName)) return;
-    if (!el.classmapModal.hidden || !el.confirmDeleteModal.hidden) return;
+    if (!el.promptClassModal.hidden) {
+      if (e.key === "Escape") { e.preventDefault(); answerPromptClass(null); }
+      const idx = Number(e.key) - 1;
+      if (e.key >= "1" && e.key <= "9" && idx < state.classes.length) { e.preventDefault(); answerPromptClass(idx); }
+      return;
+    }
+    if (!el.classmapModal.hidden) return;
 
     if (e.key === "Escape") {
       e.preventDefault();
@@ -602,7 +671,7 @@
 
     if ((e.key === "Delete" || e.key === "Backspace") && e.shiftKey) {
       e.preventDefault();
-      openConfirmDelete();
+      deleteCurrentImage();
       return;
     }
 
@@ -695,12 +764,14 @@
       const data = await api(metaUrl(filename));
       state.currentFilename = filename;
       state.boxes = data.boxes;
+      state.dirty = false;
       state.selectedIndex = null;
       state.zoom = 1; state.panX = 0; state.panY = 0;
       await loadImageBitmap(filename);
       renderClassList();
       updateCounts();
       updateNavButtons();
+      runAutoPrompt();
     } catch (err) {
       showToast(err.message, true);
     } finally {
@@ -734,27 +805,319 @@
     el.annotatedTabCount.textContent = state.annotatedCount;
   }
 
+  // --- segmentation (SAM) ----------------------------------------------------
+
+  function polygonBounds(polygon) {
+    const xs = polygon.map((p) => p[0]), ys = polygon.map((p) => p[1]);
+    const left = Math.min(...xs), right = Math.max(...xs);
+    const top = Math.min(...ys), bottom = Math.max(...ys);
+    return { x: (left + right) / 2, y: (top + bottom) / 2, w: right - left, h: bottom - top };
+  }
+
+  // Maps a normalized polygon from one box onto another — used when SAM is
+  // off, so a mask moves/stretches along with its box instead of staying put.
+  function fitPolygon(polygon, from, to) {
+    const sx = from.w ? to.w / from.w : 1, sy = from.h ? to.h / from.h : 1;
+    const fromLeft = from.x - from.w / 2, fromTop = from.y - from.h / 2;
+    const toLeft = to.x - to.w / 2, toTop = to.y - to.h / 2;
+    return polygon.map(([x, y]) => [toLeft + (x - fromLeft) * sx, toTop + (y - fromTop) * sy]);
+  }
+
+  // A moved/resized box: with SAM, re-mask it from the new box; without SAM,
+  // carry its existing mask along. Either way the change gets saved.
+  function boxChanged(box, orig) {
+    if (state.samLoaded) {
+      segmentBox(box); // autosaves once the mask is back
+      return;
+    }
+    if (box.polygon) box.polygon = fitPolygon(box.polygon, orig, box);
+    autosave();
+  }
+
+  // Swaps a box's mask for SAM's next candidate (e.g. whole vest instead of
+  // half of it), prompted with the same box as before.
+  function nextMask(box) {
+    if (!box) return;
+    const choice = ((maskChoices.get(box) || 0) + 1) % 3;
+    maskChoices.set(box, choice);
+    segmentBox(box, choice);
+  }
+
+  // With SAM loaded, every box gets a mask: the box is the prompt, and once
+  // the mask comes back the box snaps to fit it. maskIndex picks one of SAM's
+  // candidate masks (see nextMask); without it, a fresh prompt from the box.
+  async function segmentBox(box, maskIndex = null) {
+    if (!state.samLoaded || !state.currentFilename || !box) return;
+    const filename = state.currentFilename;
+    const requestId = (segmentRequests.get(box) || 0) + 1;
+    segmentRequests.set(box, requestId);
+    let prompt = promptBoxes.get(box);
+    if (maskIndex === null || !prompt) {
+      prompt = { x: box.x, y: box.y, w: box.w, h: box.h };
+      promptBoxes.set(box, prompt);
+      if (maskIndex === null) maskChoices.delete(box);
+    }
+    box.polygon = null;
+    draw();
+    try {
+      const res = await api(`${metaUrl(filename)}/segment-box`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...prompt, mask_index: maskIndex }),
+      });
+      if (segmentRequests.get(box) !== requestId) return;
+      if (res.polygon) {
+        box.polygon = res.polygon;
+        Object.assign(box, polygonBounds(res.polygon));
+      }
+    } catch (err) {
+      if (segmentRequests.get(box) !== requestId) return;
+      showToast(err.message, true);
+    }
+    segmentRequests.delete(box);
+    if (state.currentFilename === filename && state.boxes.includes(box)) {
+      draw();
+      autosave();
+    }
+  }
+
+  // Text-prompt matches overlapping an existing object this much are treated
+  // as that same object and not added again.
+  const DUPLICATE_IOU = 0.7;
+
+  function boxIoU(a, b) {
+    const iw = Math.min(a.x + a.w / 2, b.x + b.w / 2) - Math.max(a.x - a.w / 2, b.x - b.w / 2);
+    const ih = Math.min(a.y + a.h / 2, b.y + b.h / 2) - Math.max(a.y - a.h / 2, b.y - b.h / 2);
+    if (iw <= 0 || ih <= 0) return 0;
+    const inter = iw * ih;
+    return inter / (a.w * a.h + b.w * b.h - inter);
+  }
+
+  // --- text prompt → class --------------------------------------------------
+  // Each comma-separated word goes to the class with the same name. Words
+  // that aren't a class name (e.g. "hardhat") are asked about once, and the
+  // answer is remembered in this browser.
+
+  const PROMPT_CLASSES_KEY = "annotator.promptClasses";
+
+  function normalizeName(name) {
+    return name.trim().toLowerCase().replace(/[\s_-]+/g, " ");
+  }
+
+  function loadPromptClasses() {
+    try {
+      return JSON.parse(localStorage.getItem(PROMPT_CLASSES_KEY)) || {};
+    } catch (err) {
+      return {};
+    }
+  }
+
+  // normalized word -> class name (a name, not an index, so it survives
+  // reordering the class list)
+  const promptClasses = loadPromptClasses();
+
+  function savePromptClasses() {
+    try {
+      localStorage.setItem(PROMPT_CLASSES_KEY, JSON.stringify(promptClasses));
+    } catch (err) {
+      // not fatal — the answer just won't survive a reload
+    }
+    renderPromptChips();
+  }
+
+  function classForWord(word) {
+    const key = normalizeName(word);
+    const direct = state.classes.findIndex((c) => normalizeName(c) === key);
+    if (direct >= 0) return direct;
+    const remembered = state.classes.indexOf(promptClasses[key]);
+    return remembered >= 0 ? remembered : null;
+  }
+
+  function renderPromptChips() {
+    el.promptChips.innerHTML = "";
+    Object.entries(promptClasses).forEach(([word, className]) => {
+      const chip = document.createElement("span");
+      chip.className = "prompt-chip";
+      chip.textContent = `${word} → ${className}`;
+      const forget = document.createElement("button");
+      forget.textContent = "×";
+      forget.title = "Forget — you'll be asked again next time";
+      forget.addEventListener("click", () => {
+        delete promptClasses[word];
+        savePromptClasses();
+      });
+      chip.appendChild(forget);
+      el.promptChips.appendChild(chip);
+    });
+  }
+
+  let answerPromptClass = () => {};
+
+  // Asks which class an unknown word belongs to. Resolves to a class index,
+  // or null if skipped.
+  function askPromptClass(word) {
+    el.samPromptInput.blur(); // so 1–9 / Esc reach the question, not the text box
+    el.promptClassTerm.textContent = word;
+    el.promptClassOptions.innerHTML = "";
+    return new Promise((resolve) => {
+      answerPromptClass = (classIdx) => {
+        el.promptClassModal.hidden = true;
+        answerPromptClass = () => {};
+        if (classIdx !== null) {
+          promptClasses[normalizeName(word)] = state.classes[classIdx];
+          savePromptClasses();
+        }
+        resolve(classIdx);
+      };
+      state.classes.forEach((name, i) => {
+        const row = document.createElement("button");
+        row.className = "class-picker-row";
+        const swatch = document.createElement("span");
+        swatch.className = "swatch";
+        swatch.style.background = classColor(i);
+        const label = document.createElement("span");
+        label.textContent = name;
+        const key = document.createElement("span");
+        key.className = "class-key";
+        key.textContent = i < 9 ? i + 1 : "";
+        row.append(swatch, label, key);
+        row.addEventListener("click", () => answerPromptClass(i));
+        el.promptClassOptions.appendChild(row);
+      });
+      el.promptClassModal.hidden = false;
+    });
+  }
+
+  el.promptClassSkip.addEventListener("click", () => answerPromptClass(null));
+
+  // The last prompt you ran is re-run on every new image on the Pending tab,
+  // until you run a different one or press Stop. Remembered in this browser.
+  const AUTO_PROMPT_KEY = "annotator.autoPrompt";
+  let autoPrompt = null;
+  try {
+    autoPrompt = localStorage.getItem(AUTO_PROMPT_KEY);
+  } catch (err) {
+    // no storage — auto prompt just won't survive a reload
+  }
+
+  function setAutoPrompt(text) {
+    autoPrompt = text;
+    try {
+      if (text) localStorage.setItem(AUTO_PROMPT_KEY, text);
+      else localStorage.removeItem(AUTO_PROMPT_KEY);
+    } catch (err) {
+      // not fatal
+    }
+    renderAutoPrompt();
+  }
+
+  function renderAutoPrompt() {
+    el.autoPrompt.hidden = !autoPrompt;
+    el.autoPromptText.textContent = autoPrompt || "";
+  }
+
+  el.autoPromptStop.addEventListener("click", () => setAutoPrompt(null));
+
+  // Called whenever a new image is shown.
+  function runAutoPrompt() {
+    if (!autoPrompt || el.samPanel.hidden || state.activeTab !== "pending") return;
+    runPrompt(autoPrompt, { auto: true });
+  }
+
+  // One prompt run per image at a time. A run for an image you've already
+  // left stops by itself, so the new image's run can start right away.
+  let promptRunCount = 0;
+  let activeRun = null; // { id, filename }
+
+  function segmentText() {
+    const text = el.samPromptInput.value.split(",").map((w) => w.trim()).filter(Boolean).join(", ");
+    if (!text) return;
+    setAutoPrompt(text);
+    runPrompt(text, { auto: false });
+  }
+
+  async function runPrompt(text, { auto }) {
+    const filename = state.currentFilename;
+    if (!filename) return;
+    if (activeRun && activeRun.filename === filename) return; // already running on this image
+    const run = { id: ++promptRunCount, filename };
+    activeRun = run;
+    const stillCurrent = () => activeRun === run && state.currentFilename === filename;
+    el.samPromptBtn.disabled = true;
+    try {
+      // work out every word's class first, so all questions come up front —
+      // auto-runs never ask, they just skip words with no class
+      const jobs = [];
+      for (const word of text.split(",").map((w) => w.trim()).filter(Boolean)) {
+        let classId = classForWord(word);
+        if (classId === null && !auto) classId = await askPromptClass(word);
+        if (classId !== null) jobs.push({ word, classId });
+      }
+
+      const summary = [];
+      for (const { word, classId } of jobs) {
+        const res = await api(`${metaUrl(filename)}/segment-text`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ prompt: word.replace(/_/g, " ") }),
+        });
+        if (!stillCurrent()) return;
+        const fresh = res.objects.filter((obj) => !state.boxes.some((b) => boxIoU(obj, b) >= DUPLICATE_IOU));
+        fresh.forEach((obj) => state.boxes.push({ class_id: classId, ...obj }));
+        const skipped = res.objects.length - fresh.length;
+        summary.push(`${word} → ${state.classes[classId]}: `
+          + (res.objects.length ? `${fresh.length}` : "no matches")
+          + (skipped ? ` (${skipped} already labelled)` : ""));
+        if (fresh.length) {
+          draw();
+          renderClassList();
+          autosave();
+        }
+      }
+      if (summary.length) showToast((auto ? "Auto: " : "") + summary.join(" · "));
+    } catch (err) {
+      if (stillCurrent()) showToast(err.message, true);
+    } finally {
+      if (activeRun === run) {
+        activeRun = null;
+        el.samPromptBtn.disabled = false;
+      }
+    }
+  }
+
+  el.samPromptBtn.addEventListener("click", segmentText);
+  el.samPromptInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); segmentText(); }
+    if (e.key === "Escape") el.samPromptInput.blur();
+  });
+
   // --- navigation actions ------------------------------------------------
 
   function cleanBoxes() {
     return state.boxes.filter((b) => b && b.w > 0.001 && b.h > 0.001);
   }
 
+  // Saves go out one at a time, in the order they were made — otherwise a
+  // slow older save could land after a newer one and overwrite it. The box
+  // list is captured when the save is queued, not when it's sent.
+  let saveChain = Promise.resolve();
+  function queueSave(url, boxes) {
+    const body = JSON.stringify({ boxes });
+    const send = () => api(url, { method: "POST", headers: { "Content-Type": "application/json" }, body });
+    const result = saveChain.then(send, send);
+    saveChain = result.catch(() => {});
+    return result;
+  }
+
   // Fire-and-forget: protects in-progress edits on disk. On the Pending tab
   // this writes a draft without finalizing (image stays in the queue); on
   // the Annotated tab it updates the label of an already-finished image in
-  // place. Called on every box add/delete.
-  async function autosave() {
+  // place. Called on every edit.
+  function autosave() {
     if (!state.currentFilename) return;
+    state.dirty = true;
     const action = state.activeTab === "annotated" ? "save" : "autosave";
-    try {
-      await api(`${metaUrl(state.currentFilename)}/${action}`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ boxes: cleanBoxes() }),
-      });
-    } catch (err) {
+    queueSave(`${metaUrl(state.currentFilename)}/${action}`, cleanBoxes()).catch(() => {
       // non-critical — the full state still gets written when the image is finalized/left
-    }
+    });
   }
 
   // Finalizes the current pending image (writes its label, moves it into
@@ -762,10 +1125,7 @@
   async function finalizeAndMove(direction) {
     if (!state.currentFilename) return;
     try {
-      const res = await api(`/api/image/${encodeURIComponent(state.currentFilename)}/save`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ boxes: cleanBoxes() }),
-      });
+      const res = await queueSave(`/api/image/${encodeURIComponent(state.currentFilename)}/save`, cleanBoxes());
       state.pendingCount = res.pending_count;
       state.annotatedCount = res.annotated_count;
       state.queue.splice(state.queueIndex, 1);
@@ -780,17 +1140,15 @@
     }
   }
 
-  // Ensures the image being left has its current box state persisted, even
-  // if the last edit was a move/resize (which autosave doesn't cover) rather
-  // than an add/delete. Only the Annotated tab needs this explicitly — the
-  // Pending tab's finalizeAndMove already re-sends the full box list.
+  // Makes sure the image being left has its latest boxes on disk. Only the
+  // Annotated tab needs this — the Pending tab's finalizeAndMove already
+  // re-sends the full box list. Skipped if nothing was edited, so just
+  // browsing never rewrites a label (with SAM on, that would turn old
+  // box-only labels into masks).
   async function persistCurrentBeforeLeaving() {
-    if (state.activeTab !== "annotated" || !state.currentFilename) return;
+    if (state.activeTab !== "annotated" || !state.currentFilename || !state.dirty) return;
     try {
-      await api(`/api/annotated/${encodeURIComponent(state.currentFilename)}/save`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ boxes: cleanBoxes() }),
-      });
+      await queueSave(`/api/annotated/${encodeURIComponent(state.currentFilename)}/save`, cleanBoxes());
     } catch (err) {
       showToast(err.message, true);
     }
@@ -803,20 +1161,38 @@
     await loadCurrent();
   }
 
-  function nextImage() {
-    if (state.activeTab === "pending") finalizeAndMove(0);
-    else browseAnnotated(1);
+  // One navigation at a time: a second Next/Prev/Delete/tab switch while one
+  // is still running (double-click, held key) would act on the same image
+  // twice and skip the following one.
+  let navigating = false;
+  function oneAtATime(fn) {
+    return async (...args) => {
+      if (navigating) return;
+      navigating = true;
+      try {
+        await fn(...args);
+      } finally {
+        navigating = false;
+      }
+    };
   }
 
-  function prevImage() {
-    if (state.activeTab === "pending") finalizeAndMove(-1);
-    else browseAnnotated(-1);
-  }
+  const nextImage = oneAtATime(() => (state.activeTab === "pending" ? finalizeAndMove(0) : browseAnnotated(1)));
+  const prevImage = oneAtATime(() => (state.activeTab === "pending" ? finalizeAndMove(-1) : browseAnnotated(-1)));
 
-  function openConfirmDelete() {
+  const deleteCurrentImage = oneAtATime(async () => {
     if (!state.currentFilename || state.activeTab !== "pending") return;
-    el.confirmDeleteModal.hidden = false;
-  }
+    try {
+      const res = await api(`/api/image/${encodeURIComponent(state.currentFilename)}`, { method: "DELETE" });
+      state.pendingCount = res.pending_count;
+      state.annotatedCount = res.annotated_count;
+      state.queue.splice(state.queueIndex, 1);
+      if (state.queueIndex >= state.queue.length) state.queueIndex = 0;
+      await loadCurrent();
+    } catch (err) {
+      showToast(err.message, true);
+    }
+  });
 
   // --- tabs ------------------------------------------------------------------
 
@@ -838,7 +1214,7 @@
     await loadCurrent();
   }
 
-  async function switchTab(tab) {
+  const switchTab = oneAtATime(async (tab) => {
     if (state.activeTab === tab) return;
     hideContextMenu();
     await persistCurrentBeforeLeaving();
@@ -847,26 +1223,12 @@
     el.annotatedTab.classList.toggle("active", tab === "annotated");
     el.deleteImageBtn.hidden = tab !== "pending";
     await loadQueueForTab();
-  }
+  });
 
   el.pendingTab.addEventListener("click", () => switchTab("pending"));
   el.annotatedTab.addEventListener("click", () => switchTab("annotated"));
 
-  el.deleteImageBtn.addEventListener("click", openConfirmDelete);
-  el.cancelDeleteBtn.addEventListener("click", () => { el.confirmDeleteModal.hidden = true; });
-  el.confirmDeleteBtn.addEventListener("click", async () => {
-    el.confirmDeleteModal.hidden = true;
-    try {
-      const res = await api(`/api/image/${encodeURIComponent(state.currentFilename)}`, { method: "DELETE" });
-      state.pendingCount = res.pending_count;
-      state.annotatedCount = res.annotated_count;
-      state.queue.splice(state.queueIndex, 1);
-      if (state.queueIndex >= state.queue.length) state.queueIndex = 0;
-      await loadCurrent();
-    } catch (err) {
-      showToast(err.message, true);
-    }
-  });
+  el.deleteImageBtn.addEventListener("click", deleteCurrentImage);
 
   el.nextActionBtn.addEventListener("click", nextImage);
   el.prevBtn.addEventListener("click", prevImage);
@@ -896,6 +1258,8 @@
       showToast(err.message, true);
     }
   }
+
+  el.warningClose.addEventListener("click", () => { el.warningBar.hidden = true; });
 
   el.classmapBtn.addEventListener("click", openClassmap);
   el.classmapCancelBtn.addEventListener("click", () => { el.classmapModal.hidden = true; });
@@ -927,8 +1291,22 @@
       state.pendingCount = s.pending_count;
       state.annotatedCount = s.annotated_count;
 
-      el.modelBadge.textContent = s.model_loaded ? "Model loaded" : "Manual mode";
-      el.modelBadge.className = "badge " + (s.model_loaded ? "on" : "off");
+      state.samLoaded = s.sam_loaded;
+      el.modelBadge.textContent = s.model_loaded && s.sam_loaded ? "Detection + SAM"
+        : s.sam_loaded ? "SAM only"
+        : s.model_loaded ? "Model loaded" : "Manual mode";
+      el.modelBadge.className = "badge " + (s.model_loaded || s.sam_loaded ? "on" : "off");
+      // text prompts are for SAM-only mode — with a detection model, SAM just masks its boxes
+      el.samPanel.hidden = !(s.sam_loaded && !s.model_loaded);
+      el.ctxNextMask.hidden = !s.sam_loaded;
+      renderPromptChips();
+      renderAutoPrompt();
+      if (autoPrompt) el.samPromptInput.value = autoPrompt;
+
+      if (s.warnings.length) {
+        el.warningText.textContent = s.warnings.join("\n");
+        el.warningBar.hidden = false;
+      }
 
       renderClassList();
       await loadQueueForTab();

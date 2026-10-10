@@ -3,3 +3,12 @@ uvicorn[standard]
 ultralytics
 pyyaml
 Pillow
+timm
+ftfy==6.1.1
+iopath
+regex
+einops
+pycocotools
+psutil
+huggingface_hub
+setuptools<81

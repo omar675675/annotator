@@ -27,6 +27,10 @@
   <main class="layout">
     <section class="canvas-wrap">
       <canvas id="canvas"></canvas>
+      <div id="warningBar" class="warning-bar" hidden>
+        <span id="warningText"></span>
+        <button id="warningClose" class="icon-btn" title="Dismiss">×</button>
+      </div>
       <button id="prevBtn" class="nav-arrow left" title="Previous image">‹</button>
       <button id="nextBtn" class="nav-arrow right" title="Next image">›</button>
       <div id="emptyState" class="empty-state" hidden>
@@ -45,6 +49,20 @@
         <ul id="classList" class="class-list"></ul>
       </div>
 
+      <div id="samPanel" class="panel" hidden>
+        <h3>Segment by text</h3>
+        <p class="hint">Finds every match in the image. Separate words with commas. Each word goes to the class with the same name — for other words you're asked once, and the answer is remembered.</p>
+        <div class="sam-prompt">
+          <input id="samPromptInput" type="text" placeholder="e.g. helmet, vest" />
+          <button id="samPromptBtn" class="btn primary small">Segment</button>
+        </div>
+        <div id="autoPrompt" class="auto-prompt" hidden>
+          <span>Auto-runs on new images: <strong id="autoPromptText"></strong></span>
+          <button id="autoPromptStop" class="btn small">Stop</button>
+        </div>
+        <div id="promptChips" class="prompt-chips"></div>
+      </div>
+
       <div class="panel actions">
         <button id="nextActionBtn" class="btn primary">Next <kbd>→</kbd></button>
         <button id="deleteImageBtn" class="btn danger">Delete Image <kbd>⇧Del</kbd></button>
@@ -55,7 +73,7 @@
         <ul class="shortcut-list">
           <li><kbd>drag</kbd> draw / move / resize box</li>
           <li><kbd>B</kbd> draw tool, <kbd>D</kbd> pan tool, <kbd>Esc</kbd> select tool</li>
-          <li><kbd>right-click</kbd> box: delete / duplicate</li>
+          <li><kbd>right-click</kbd> box: delete / duplicate, or next mask with SAM</li>
           <li><kbd>1</kbd>–<kbd>9</kbd> set class</li>
           <li><kbd>Del</kbd> delete selected box</li>
           <li><kbd>wheel</kbd> zoom, <kbd>space</kbd>+drag pan</li>
@@ -78,18 +96,19 @@
     </div>
   </div>
 
-  <div id="confirmDeleteModal" class="modal-backdrop" hidden>
+  <div id="promptClassModal" class="modal-backdrop" hidden>
     <div class="modal">
-      <h2>Delete this image?</h2>
-      <p class="hint">This permanently removes the image file. There is no undo.</p>
+      <h2>Which class is "<span id="promptClassTerm"></span>"?</h2>
+      <p class="hint">It doesn't match any of your class names. Your answer is remembered for next time.</p>
+      <div id="promptClassOptions" class="prompt-class-options"></div>
       <div class="modal-actions">
-        <button id="cancelDeleteBtn" class="btn">Cancel</button>
-        <button id="confirmDeleteBtn" class="btn danger">Delete</button>
+        <button id="promptClassSkip" class="btn">Skip this word <kbd>Esc</kbd></button>
       </div>
     </div>
   </div>
 
   <div id="boxContextMenu" class="context-menu" hidden>
+    <button id="ctxNextMask" hidden>Next mask</button>
     <button id="ctxDuplicate">Duplicate</button>
     <button id="ctxDelete" class="danger">Delete</button>
   </div>

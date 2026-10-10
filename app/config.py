@@ -8,10 +8,12 @@ from pathlib import Path
 import yaml
 
 TEMPLATE = """model_path: ""
+sam_model_path: ""
 dataset_dir: "images"
 annotated_dir: "annotated"
 classes: []
 confidence_threshold: 0.25
+sam_confidence_threshold: 0.5
 class_map: {}
 """
 
@@ -21,20 +23,24 @@ CONFIG_PATH = Path("config.yaml")
 @dataclass
 class Config:
     model_path: str
+    sam_model_path: str
     dataset_dir: str
     annotated_dir: str
     classes: list[str]
     confidence_threshold: float
+    sam_confidence_threshold: float
     class_map: dict[str, str | None]
     path: Path = field(default=CONFIG_PATH)
 
     def save(self) -> None:
         data = {
             "model_path": self.model_path,
+            "sam_model_path": self.sam_model_path,
             "dataset_dir": self.dataset_dir,
             "annotated_dir": self.annotated_dir,
             "classes": self.classes,
             "confidence_threshold": self.confidence_threshold,
+            "sam_confidence_threshold": self.sam_confidence_threshold,
             "class_map": self.class_map,
         }
         with self.path.open("w") as f:
@@ -71,10 +77,12 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
 
     return Config(
         model_path=(raw.get("model_path") or "").strip(),
+        sam_model_path=(raw.get("sam_model_path") or "").strip(),
         dataset_dir=dataset_dir,
         annotated_dir=raw.get("annotated_dir") or "annotated",
         classes=list(raw.get("classes") or []),
         confidence_threshold=float(raw.get("confidence_threshold", 0.25)),
+        sam_confidence_threshold=float(raw.get("sam_confidence_threshold", 0.5)),
         class_map=dict(raw.get("class_map") or {}),
         path=path,
     )

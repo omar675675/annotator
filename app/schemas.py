@@ -9,6 +9,19 @@ class BoxIn(BaseModel):
     y: float
     w: float
     h: float
+    polygon: list[list[float]] | None = None
+
+
+class BoxRect(BaseModel):
+    x: float
+    y: float
+    w: float
+    h: float
+    mask_index: int | None = None
+
+
+class TextPromptRequest(BaseModel):
+    prompt: str
 
 
 class SaveRequest(BaseModel):
