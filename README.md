@@ -73,6 +73,8 @@ pick a class for each one. Labels are saved as boxes.
 `classes` has to be set, since there's no model to read class names from.
 
 <!-- screenshot: no model -->
+<img width="1600" height="747" alt="no models" src="https://github.com/user-attachments/assets/65795c91-b645-446f-b3ef-b02f141fbc2d" />
+
 
 ### Detection model only
 
@@ -96,6 +98,8 @@ You fix, delete or add boxes, then move on. Labels are saved as boxes.
   prediction.
 
 <!-- screenshot: detection model only -->
+<img width="1600" height="747" alt="ppemodel" src="https://github.com/user-attachments/assets/a2f8a69c-fcab-421a-bf9e-2b4d0fdf8c66" />
+
 
 ### SAM model only
 
@@ -132,6 +136,8 @@ You can also draw a box by hand and SAM will mask whatever is inside it.
 SAM needs a GPU in practice, about 4.5 GB of memory.
 
 <!-- screenshot: SAM model only -->
+<img width="1600" height="747" alt="sammodel" src="https://github.com/user-attachments/assets/d30d30c1-5fbc-4f5b-b64a-1c60255707b4" />
+
 
 ### Both models
 
@@ -148,6 +154,8 @@ Everything from the detection-only section applies (thresholds, class
 mapping). Labels are saved as masks.
 
 <!-- screenshot: both models -->
+<img width="1600" height="747" alt="both" src="https://github.com/user-attachments/assets/2311f4cf-79ab-4382-bc66-805e748e67d4" />
+
 
 ### Things that work the same whenever SAM is on
 
